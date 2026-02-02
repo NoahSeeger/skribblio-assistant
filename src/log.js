@@ -4,4 +4,8 @@ export default function (message) {
     console.log(`skribbl.io AutoDraw: ${message}`);
 };
 
-let loggingEnabled = true;
+export const setLoggingEnabled = function (enabled) {
+    loggingEnabled = Boolean(enabled);
+};
+
+let loggingEnabled = false;

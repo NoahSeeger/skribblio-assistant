@@ -1,7 +1,17 @@
 {
-  "requires": true,
-  "lockfileVersion": 1,
+  "name": "skribbl-io-autodraw",
+  "version": "0.4.0",
+  "description": "Auto draw images in skribbl.io via drag & drop.",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --minify --sourcemap --outfile=dist/main.js",
+    "build:dev": "esbuild src/index.js --bundle --sourcemap --outfile=dist/main.js",
+    "watch": "esbuild src/index.js --bundle --sourcemap --outfile=dist/main.js --watch"
+  },
   "dependencies": {
     "color-diff": "^1.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
   }
 }

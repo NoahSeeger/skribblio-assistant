@@ -40,7 +40,7 @@ export function loadImage(url) {
         const image = new Image;
         image.crossOrigin = "Anonymous";
         image.onload = function () {
-            const blockedByCors = image.height === image.width === 0;
+            const blockedByCors = image.height === 0 && image.width === 0;
             const executor = blockedByCors ? reject : resolve;
             executor(image);
         };
