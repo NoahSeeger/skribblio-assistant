@@ -8,6 +8,7 @@ import processWithoutBlocking from "./non-blocking-processor";
 import listenForDragDropEvents from "./drag-drop-event-listener";
 import createDomHelper from "./dom-helper";
 import createSettingsPanel from "./settings-panel";
+import createHintAssistant from "./hint-assistant";
 
 const domHelper = createDomHelper(document);
 const clearToolElement = domHelper.getClearToolElement();
@@ -15,6 +16,19 @@ const canvas = createCanvas(domHelper.getCanvasElement());
 const toolbar = createToolbar(domHelper);
 const artist = createArtist(canvas, toolbar);
 const settingsPanel = createSettingsPanel(document);
+
+let hintAssistantInstance = null;
+const startHintAssistant = function () {
+    if (hintAssistantInstance) return true;
+    hintAssistantInstance = createHintAssistant(document) || null;
+    return Boolean(hintAssistantInstance);
+};
+
+if (!startHintAssistant()) {
+    const hintInterval = setInterval(() => {
+        if (startHintAssistant()) clearInterval(hintInterval);
+    }, 750);
+}
 
 let settings = settingsPanel.getSettings();
 settingsPanel.onChange(newSettings => {
