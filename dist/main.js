@@ -837,6 +837,175 @@
     };
   }
 
+  // src/floating-panel.js
+  var clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  var isFiniteNumber = (value) => typeof value === "number" && Number.isFinite(value);
+  var resolvePosition = (source, panel, fallback) => {
+    if (typeof source === "function") {
+      const result = source(panel);
+      return typeof result === "object" && result ? result : fallback;
+    }
+    if (source && typeof source === "object") {
+      return source;
+    }
+    return fallback;
+  };
+  function createFloatingPanel(doc, options = {}) {
+    if (!doc) throw new Error("Document reference is required to create a floating panel.");
+    const {
+      id,
+      title = "",
+      parent = doc.body,
+      panelClass = "",
+      headerClass = "autoDrawHeader",
+      headerId,
+      bodyClass = "",
+      bodyId,
+      collapseClass = "autoDrawCollapse",
+      collapseButtonId,
+      initiallyCollapsed = false,
+      initialPosition,
+      getDefaultPosition,
+      onPositionChange,
+      onCollapsedChange,
+      subtitle = "",
+      zIndex
+    } = options;
+    const panel = doc.createElement("div");
+    panel.id = id;
+    panel.className = ["floatingPanel", panelClass].filter(Boolean).join(" ");
+    if (typeof zIndex === "number") {
+      panel.style.zIndex = String(zIndex);
+    }
+    const header = doc.createElement("div");
+    header.className = ["autoDrawHeader", headerClass].filter(Boolean).join(" ");
+    if (headerId) header.id = headerId;
+    const titleWrapper = doc.createElement("div");
+    titleWrapper.className = "floatingPanelHeaderTitle";
+    const titleEl = doc.createElement("span");
+    titleEl.className = "floatingPanelTitle";
+    titleEl.textContent = title;
+    const subtitleEl = doc.createElement("span");
+    subtitleEl.className = "floatingPanelSubtitle";
+    subtitleEl.textContent = subtitle;
+    subtitleEl.hidden = !subtitle;
+    titleWrapper.appendChild(titleEl);
+    titleWrapper.appendChild(subtitleEl);
+    const headerActions = doc.createElement("div");
+    headerActions.className = "floatingPanelHeaderActions";
+    const collapseButton = doc.createElement("button");
+    collapseButton.type = "button";
+    collapseButton.className = collapseClass;
+    if (collapseButtonId) collapseButton.id = collapseButtonId;
+    collapseButton.textContent = initiallyCollapsed ? "+" : "\u2013";
+    headerActions.appendChild(collapseButton);
+    header.appendChild(titleWrapper);
+    header.appendChild(headerActions);
+    const body = doc.createElement("div");
+    body.className = ["floatingPanelBody", bodyClass].filter(Boolean).join(" ");
+    if (bodyId) body.id = bodyId;
+    panel.appendChild(header);
+    panel.appendChild(body);
+    parent.appendChild(panel);
+    if (initiallyCollapsed) {
+      panel.classList.add("collapsed");
+    }
+    const defaultPositionFn = typeof getDefaultPosition === "function" ? getDefaultPosition : () => ({ left: 12, top: 120 });
+    const clampPositionToViewport = (pos) => {
+      const width = panel.offsetWidth || 280;
+      const height = panel.offsetHeight || 200;
+      const ww = window.innerWidth || width + 16;
+      const wh = window.innerHeight || height + 16;
+      const safeLeft = isFiniteNumber(pos?.left) ? pos.left : 12;
+      const safeTop = isFiniteNumber(pos?.top) ? pos.top : 120;
+      return {
+        left: clamp(safeLeft, 8, Math.max(8, ww - width - 8)),
+        top: clamp(safeTop, 8, Math.max(8, wh - height - 8))
+      };
+    };
+    const initial = resolvePosition(initialPosition, panel, defaultPositionFn(panel));
+    let position = clampPositionToViewport(initial);
+    const applyPosition = (next) => {
+      position = clampPositionToViewport(next || position);
+      panel.style.left = `${position.left}px`;
+      panel.style.top = `${position.top}px`;
+    };
+    applyPosition(position);
+    const emitPosition = () => {
+      if (typeof onPositionChange === "function") {
+        onPositionChange({ ...position });
+      }
+    };
+    const handleResize = () => {
+      applyPosition(position);
+      emitPosition();
+    };
+    window.addEventListener("resize", handleResize);
+    const isInteractiveTarget = (target) => Boolean(target?.closest("button, input, select, textarea, a"));
+    const startDrag = (event) => {
+      if (event.button !== 0) return;
+      if (isInteractiveTarget(event.target)) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const rect = panel.getBoundingClientRect();
+      const startLeft = rect.left;
+      const startTop = rect.top;
+      const move = (moveEvent) => {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        applyPosition({
+          left: startLeft + dx,
+          top: startTop + dy
+        });
+      };
+      const end = () => {
+        doc.removeEventListener("mousemove", move);
+        doc.removeEventListener("mouseup", end);
+        emitPosition();
+      };
+      doc.addEventListener("mousemove", move);
+      doc.addEventListener("mouseup", end);
+    };
+    header.addEventListener("mousedown", startDrag);
+    const setCollapsed = (collapsed) => {
+      panel.classList.toggle("collapsed", collapsed);
+      collapseButton.textContent = collapsed ? "+" : "\u2013";
+      if (typeof onCollapsedChange === "function") {
+        onCollapsedChange(collapsed);
+      }
+    };
+    collapseButton.addEventListener("click", () => {
+      setCollapsed(!panel.classList.contains("collapsed"));
+    });
+    const setSubtitle = (text) => {
+      subtitleEl.textContent = text || "";
+      subtitleEl.hidden = !text;
+    };
+    const setTitle = (text) => {
+      titleEl.textContent = text || "";
+    };
+    const destroy = () => {
+      window.removeEventListener("resize", handleResize);
+      header.removeEventListener("mousedown", startDrag);
+    };
+    return {
+      panel,
+      header,
+      body,
+      collapseButton,
+      headerActions,
+      titleEl,
+      subtitleEl,
+      setSubtitle,
+      setTitle,
+      setCollapsed,
+      isCollapsed: () => panel.classList.contains("collapsed"),
+      getPosition: () => ({ ...position }),
+      destroy
+    };
+  }
+
   // src/settings-panel.js
   var STORAGE_KEY = "skribbl-autodraw-settings-v3";
   var DEFAULT_SETTINGS = {
@@ -854,7 +1023,7 @@
     useCorsProxy: true,
     showAdvanced: false,
     debugLogging: false,
-    panelPosition: { right: 12, top: 120 }
+    panelPosition: { left: null, top: 120 }
   };
   var PRESETS = {
     fast: {
@@ -882,7 +1051,7 @@
       enableFill: true
     }
   };
-  var clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  var clamp2 = (value, min, max) => Math.max(min, Math.min(max, value));
   var loadSettings = function() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
@@ -975,18 +1144,39 @@
   };
   function createSettingsPanel(doc) {
     const settings2 = loadSettings();
-    const panel = doc.createElement("div");
-    panel.id = "autoDrawPanel";
-    panel.style.top = `${settings2.panelPosition.top}px`;
-    const header = doc.createElement("div");
-    header.className = "autoDrawHeader";
-    header.textContent = "AutoDraw";
-    const collapse = doc.createElement("button");
-    collapse.className = "autoDrawCollapse";
-    collapse.textContent = "\u2013";
-    header.appendChild(collapse);
-    const body = doc.createElement("div");
-    body.className = "autoDrawBody";
+    const PANEL_WIDTH_PX = 280;
+    const getStoredPanelPosition = function() {
+      const stored = settings2.panelPosition || {};
+      if (typeof stored.left === "number" && Number.isFinite(stored.left)) {
+        return { left: stored.left, top: typeof stored.top === "number" ? stored.top : 120 };
+      }
+      if (typeof stored.right === "number" && Number.isFinite(stored.right)) {
+        const left = Math.max(8, window.innerWidth - PANEL_WIDTH_PX - stored.right);
+        const normalized = { left, top: typeof stored.top === "number" ? stored.top : 120 };
+        settings2.panelPosition = normalized;
+        saveSettings(settings2);
+        return normalized;
+      }
+      return null;
+    };
+    const floatingPanel = createFloatingPanel(doc, {
+      id: "autoDrawPanel",
+      title: "AutoDraw",
+      bodyClass: "autoDrawBody",
+      collapseClass: "autoDrawCollapse",
+      initialPosition: getStoredPanelPosition(),
+      getDefaultPosition: (panelEl) => {
+        const width = panelEl?.offsetWidth || PANEL_WIDTH_PX;
+        const left = Math.max(8, window.innerWidth - width - 12);
+        return { left, top: 120 };
+      },
+      onPositionChange: (position) => {
+        settings2.panelPosition = { left: position.left, top: position.top };
+        saveSettings(settings2);
+      },
+      zIndex: 9999
+    });
+    const { body } = floatingPanel;
     const presetInput = createRadioGroup("autoDrawPreset", [
       { value: "fast", label: "Fast" },
       { value: "balanced", label: "Balanced" },
@@ -1038,26 +1228,6 @@
     body.appendChild(stopButton);
     body.appendChild(status);
     body.appendChild(estimate);
-    panel.appendChild(header);
-    panel.appendChild(body);
-    doc.body.appendChild(panel);
-    const placePanel = function() {
-      const pw = panel.offsetWidth || 240;
-      const ww = window.innerWidth;
-      if (settings2.panelPosition.left != null) {
-        const left = Math.max(8, Math.min(settings2.panelPosition.left, ww - pw - 8));
-        panel.style.left = `${left}px`;
-      } else {
-        const right = settings2.panelPosition.right || 12;
-        const left = Math.max(8, Math.min(ww - pw - right, ww - pw - 8));
-        panel.style.left = `${left}px`;
-      }
-      const ph = panel.offsetHeight || 200;
-      const top = Math.max(8, Math.min(settings2.panelPosition.top || 120, window.innerHeight - ph - 8));
-      panel.style.top = `${top}px`;
-    };
-    placePanel();
-    window.addEventListener("resize", placePanel);
     const listeners = [];
     const applyPreset = function(presetId) {
       const preset = PRESETS[presetId];
@@ -1083,8 +1253,8 @@
       advancedSection.style.display = settings2.showAdvanced ? "grid" : "none";
     };
     const updateSettings = function() {
-      settings2.quality = clamp(parseInt(qualityInput.value, 10), 1, 5);
-      settings2.colorQuantization = clamp(parseInt(quantInput.value, 10), 4, 8);
+      settings2.quality = clamp2(parseInt(qualityInput.value, 10), 1, 5);
+      settings2.colorQuantization = clamp2(parseInt(quantInput.value, 10), 4, 8);
       settings2.colorBatching = batchingInput.checked;
       settings2.enableFill = fillInput.checked;
       settings2.useCorsProxy = proxyInput.checked;
@@ -1119,54 +1289,6 @@
         updateSettings();
       });
     });
-    collapse.addEventListener("click", () => {
-      const collapsed = panel.classList.toggle("collapsed");
-      collapse.textContent = collapsed ? "+" : "\u2013";
-    });
-    const startDrag = function(event) {
-      if (event.target !== header) return;
-      event.preventDefault();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const rect = panel.getBoundingClientRect();
-      const startLeft = rect.left;
-      const startTop = rect.top;
-      const move = function(moveEvent) {
-        const dx = moveEvent.clientX - startX;
-        const dy = moveEvent.clientY - startY;
-        const pw = panel.offsetWidth;
-        const ph = panel.offsetHeight;
-        const ww = window.innerWidth;
-        const wh = window.innerHeight;
-        let newLeft = Math.round(startLeft + dx);
-        let newTop = Math.round(startTop + dy);
-        newLeft = Math.max(8, Math.min(newLeft, ww - pw - 8));
-        newTop = Math.max(8, Math.min(newTop, wh - ph - 8));
-        panel.style.left = `${newLeft}px`;
-        panel.style.top = `${newTop}px`;
-      };
-      const end = function() {
-        settings2.panelPosition = {
-          left: parseInt(panel.style.left, 10) || 12,
-          top: parseInt(panel.style.top, 10) || 120
-        };
-        saveSettings(settings2);
-        doc.removeEventListener("mousemove", move);
-        doc.removeEventListener("mouseup", end);
-      };
-      doc.addEventListener("mousemove", move);
-      doc.addEventListener("mouseup", end);
-    };
-    header.addEventListener("mousedown", startDrag);
-    header.addEventListener("dblclick", () => {
-      const pw = panel.offsetWidth || 240;
-      const left = Math.max(8, window.innerWidth - pw - 12);
-      const top = 120;
-      panel.style.left = `${left}px`;
-      panel.style.top = `${top}px`;
-      settings2.panelPosition = { left, top };
-      saveSettings(settings2);
-    });
     applyPreset(settings2.preset);
     updateAdvancedVisibility();
     updateSettings();
@@ -1196,6 +1318,22 @@
   var WORD_CHECK_INTERVAL_MS = 500;
   var MAX_RENDERED_RESULTS = 200;
   var TOP_INLINE_RESULTS = 3;
+  var loadPanelPosition = function() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(POS_KEY) || "{}");
+      if (typeof saved.left === "number" && typeof saved.top === "number") {
+        return { left: saved.left, top: saved.top };
+      }
+    } catch (error) {
+    }
+    return null;
+  };
+  var savePanelPosition = function(pos) {
+    try {
+      localStorage.setItem(POS_KEY, JSON.stringify({ left: pos.left, top: pos.top }));
+    } catch (error) {
+    }
+  };
   var safeJsonParse = function(text) {
     try {
       return JSON.parse(text);
@@ -1261,33 +1399,18 @@
     return words.filter((w) => w.toLowerCase().includes(term));
   };
   var createPanel = function(doc) {
-    const panel = doc.createElement("div");
-    panel.id = "hintAssistantPanel";
-    const savedPos = (() => {
-      try {
-        return JSON.parse(localStorage.getItem(POS_KEY) || "{}");
-      } catch (e) {
-        return {};
-      }
-    })();
-    panel.style.left = `${savedPos.left ?? 12}px`;
-    panel.style.top = `${savedPos.top ?? 120}px`;
-    const header = doc.createElement("div");
-    header.id = "hintAssistantHeader";
-    header.textContent = "Skribbl Hints";
-    const actions = doc.createElement("div");
-    actions.className = "hintAssistantActions";
-    const status = doc.createElement("span");
-    status.id = "hintAssistantStatus";
-    status.textContent = "Loading word list...";
-    const toggle = doc.createElement("button");
-    toggle.id = "hintAssistantToggle";
-    toggle.textContent = "\u2013";
-    actions.appendChild(status);
-    actions.appendChild(toggle);
-    header.appendChild(actions);
-    const body = doc.createElement("div");
-    body.id = "hintAssistantBody";
+    const floatingPanel = createFloatingPanel(doc, {
+      id: "hintAssistantPanel",
+      title: "Skribbl Hints",
+      bodyClass: "hintAssistantBody",
+      collapseClass: "autoDrawCollapse",
+      subtitle: "Loading word list...",
+      initialPosition: loadPanelPosition(),
+      getDefaultPosition: () => ({ left: 12, top: 120 }),
+      onPositionChange: savePanelPosition,
+      zIndex: 9998
+    });
+    const { panel, body, setSubtitle } = floatingPanel;
     const enableRow = doc.createElement("label");
     enableRow.className = "hintAssistantRow hintAssistantRow--split";
     const enableLabel = doc.createElement("span");
@@ -1333,9 +1456,7 @@
     inner.appendChild(hintList);
     body.appendChild(enableRow);
     body.appendChild(inner);
-    panel.appendChild(header);
-    panel.appendChild(body);
-    return { panel, header, body, status, toggle, hintList, enableInput, search, langSelect, inner, savedPos };
+    return { panel, body, hintList, enableInput, search, langSelect, inner, setSubtitle };
   };
   var renderHints = function(doc, { hintList, inputChat, formChat }, words, pattern) {
     hintList.innerHTML = "";
@@ -1370,10 +1491,8 @@
     if (doc.getElementById("hintAssistantPanel")) return null;
     const inputChat = doc.querySelector("#game-chat form.chat-form input[type=text]");
     const formChat = doc.querySelector("#game-chat form.chat-form");
-    const containerSidebar = doc.body;
     if (!inputChat || !formChat) return null;
-    const { panel, header, body, status, toggle, hintList, enableInput, search, langSelect, inner, savedPos } = createPanel(doc);
-    containerSidebar.appendChild(panel);
+    const { hintList, enableInput, search, langSelect, inner, setSubtitle } = createPanel(doc);
     let enabled = localStorage.getItem(ENABLE_KEY) !== "0";
     let wordList = [];
     let lastPattern = "";
@@ -1409,60 +1528,21 @@
     const persistEnabled = function() {
       localStorage.setItem(ENABLE_KEY, enabled ? "1" : "0");
     };
+    const updateStatus = function(text) {
+      setSubtitle(text);
+    };
     const updateEnabledUi = function() {
-      toggle.textContent = panel.classList.contains("collapsed") ? "+" : "\u2013";
       enableInput.checked = enabled;
       inner.style.display = enabled ? "" : "none";
       const langLabel = getLanguageLabel();
       if (!enabled) {
-        status.textContent = `Hints disabled (Alt to enable) | Lang: ${langLabel}`;
+        updateStatus(`Hints disabled (Alt to enable) | Lang: ${langLabel}`);
         return;
       }
       if (ready) {
-        status.textContent = `Loaded ${wordList.length} words | Lang: ${langLabel}`;
+        updateStatus(`Loaded ${wordList.length} words | Lang: ${langLabel}`);
       }
     };
-    toggle.addEventListener("click", () => {
-      const isCollapsed = panel.classList.toggle("collapsed");
-      toggle.textContent = isCollapsed ? "+" : "\u2013";
-    });
-    const startDrag = function(event) {
-      if (event.target !== header) return;
-      event.preventDefault();
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const rect = panel.getBoundingClientRect();
-      const startLeft = rect.left;
-      const startTop = rect.top;
-      const move = function(moveEvent) {
-        const dx = moveEvent.clientX - startX;
-        const dy = moveEvent.clientY - startY;
-        const pw = panel.offsetWidth || 240;
-        const ph = panel.offsetHeight || 200;
-        const ww = window.innerWidth;
-        const wh = window.innerHeight;
-        let newLeft = Math.round(startLeft + dx);
-        let newTop = Math.round(startTop + dy);
-        newLeft = Math.max(8, Math.min(newLeft, ww - pw - 8));
-        newTop = Math.max(8, Math.min(newTop, wh - ph - 8));
-        panel.style.left = `${newLeft}px`;
-        panel.style.top = `${newTop}px`;
-      };
-      const end = function() {
-        doc.removeEventListener("mousemove", move);
-        doc.removeEventListener("mouseup", end);
-        try {
-          localStorage.setItem(POS_KEY, JSON.stringify({
-            left: parseInt(panel.style.left, 10) || 12,
-            top: parseInt(panel.style.top, 10) || 120
-          }));
-        } catch (e) {
-        }
-      };
-      doc.addEventListener("mousemove", move);
-      doc.addEventListener("mouseup", end);
-    };
-    header.addEventListener("mousedown", startDrag);
     const getPattern = function() {
       const container = doc.querySelector("#game-word .hints .container");
       if (!container) return "";
@@ -1486,35 +1566,39 @@
     const inlineContainer = doc.createElement("div");
     inlineContainer.id = "hintAssistantInline";
     const attachInline = function() {
-      const gameWord = doc.getElementById("game-word");
-      const desc = gameWord ? gameWord.querySelector(".description") : null;
-      if (gameWord && desc) {
-        if (inlineContainer.parentElement !== gameWord) {
-          gameWord.insertBefore(inlineContainer, desc);
+      const chat = doc.getElementById("game-chat");
+      const chatForm = chat ? chat.querySelector(".chat-form") : null;
+      if (chat && chatForm) {
+        if (inlineContainer.parentElement !== chat || inlineContainer.nextSibling !== chatForm) {
+          chat.insertBefore(inlineContainer, chatForm);
         }
       }
     };
     attachInline();
     const renderInlineTop = function(matches) {
+      if (!enabled) {
+        if (inlineContainer.parentElement) {
+          inlineContainer.parentElement.removeChild(inlineContainer);
+        }
+        return;
+      }
       inlineContainer.innerHTML = "";
-      if (!enabled) return;
       if (!matches.length) return;
       matches.slice(0, TOP_INLINE_RESULTS).forEach((word) => {
         const chip = doc.createElement("button");
         chip.type = "button";
         chip.className = "hintAssistantInlineChip";
         chip.textContent = word;
-        chip.title = "Click to fill. Ctrl/Cmd click submits.";
-        chip.addEventListener("click", (event) => {
-          if (!inputChat) return;
+        chip.title = "Click to send guess.";
+        chip.addEventListener("click", () => {
+          if (!inputChat || !formChat) return;
           inputChat.value = word;
           inputChat.focus();
-          if (formChat) {
-            formChat.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-          }
+          formChat.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
         });
         inlineContainer.appendChild(chip);
       });
+      attachInline();
     };
     const sync = function() {
       attachInline();
@@ -1534,11 +1618,11 @@
     fetchWordList().then((words) => {
       wordList = words;
       ready = true;
-      status.textContent = `Loaded ${words.length} words | Lang: ${getLanguageLabel()}`;
+      updateStatus(`Loaded ${words.length} words | Lang: ${getLanguageLabel()}`);
       sync();
       updateEnabledUi();
     }).catch(() => {
-      status.textContent = "Failed to load word list";
+      updateStatus("Failed to load word list");
     });
     setInterval(sync, WORD_CHECK_INTERVAL_MS);
     doc.addEventListener("keyup", (event) => {
@@ -1548,6 +1632,9 @@
       lastPattern = "";
       updateEnabledUi();
       sync();
+      if (!enabled && inlineContainer.parentElement) {
+        inlineContainer.parentElement.removeChild(inlineContainer);
+      }
     });
     enableInput.addEventListener("change", () => {
       enabled = enableInput.checked;
@@ -1555,6 +1642,9 @@
       lastPattern = "";
       updateEnabledUi();
       sync();
+      if (!enabled && inlineContainer.parentElement) {
+        inlineContainer.parentElement.removeChild(inlineContainer);
+      }
     });
     search.addEventListener("input", () => {
       lastPattern = "";

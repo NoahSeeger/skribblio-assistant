@@ -1,3 +1,5 @@
+import createFloatingPanel from "./floating-panel";
+
 const STORAGE_KEY = "skribbl-autodraw-settings-v3";
 
 const DEFAULT_SETTINGS = {
@@ -11,7 +13,7 @@ const DEFAULT_SETTINGS = {
     useCorsProxy: true,
     showAdvanced: false,
     debugLogging: false,
-    panelPosition: { right: 12, top: 120 }
+    panelPosition: { left: null, top: 120 }
 };
 
 const PRESETS = {
@@ -151,23 +153,42 @@ const createRow = function (labelText, input, valueEl, tooltipText) {
 export default function createSettingsPanel(doc) {
     const settings = loadSettings();
 
-    const panel = doc.createElement("div");
-    panel.id = "autoDrawPanel";
-    // Initial placement: prefer saved `left`, else compute from saved `right`.
-    panel.style.top = `${settings.panelPosition.top}px`;
+    const PANEL_WIDTH_PX = 280;
 
-    const header = doc.createElement("div");
-    header.className = "autoDrawHeader";
-    header.textContent = "AutoDraw";
+    const getStoredPanelPosition = function () {
+        const stored = settings.panelPosition || {};
+        if (typeof stored.left === "number" && Number.isFinite(stored.left)) {
+            return { left: stored.left, top: typeof stored.top === "number" ? stored.top : 120 };
+        }
+        if (typeof stored.right === "number" && Number.isFinite(stored.right)) {
+            const left = Math.max(8, window.innerWidth - PANEL_WIDTH_PX - stored.right);
+            const normalized = { left, top: typeof stored.top === "number" ? stored.top : 120 };
+            settings.panelPosition = normalized;
+            saveSettings(settings);
+            return normalized;
+        }
+        return null;
+    };
 
-    const collapse = doc.createElement("button");
-    collapse.className = "autoDrawCollapse";
-    collapse.textContent = "–";
+    const floatingPanel = createFloatingPanel(doc, {
+        id: "autoDrawPanel",
+        title: "AutoDraw",
+        bodyClass: "autoDrawBody",
+        collapseClass: "autoDrawCollapse",
+        initialPosition: getStoredPanelPosition(),
+        getDefaultPosition: panelEl => {
+            const width = panelEl?.offsetWidth || PANEL_WIDTH_PX;
+            const left = Math.max(8, window.innerWidth - width - 12);
+            return { left, top: 120 };
+        },
+        onPositionChange: position => {
+            settings.panelPosition = { left: position.left, top: position.top };
+            saveSettings(settings);
+        },
+        zIndex: 9999
+    });
 
-    header.appendChild(collapse);
-
-    const body = doc.createElement("div");
-    body.className = "autoDrawBody";
+    const { body } = floatingPanel;
 
     const presetInput = createRadioGroup("autoDrawPreset", [
         { value: "fast", label: "Fast" },
@@ -232,36 +253,6 @@ export default function createSettingsPanel(doc) {
     body.appendChild(stopButton);
     body.appendChild(status);
     body.appendChild(estimate);
-
-    panel.appendChild(header);
-    panel.appendChild(body);
-
-    doc.body.appendChild(panel);
-
-    // After appended, compute horizontal placement so the panel stays visible.
-    const placePanel = function () {
-        const pw = panel.offsetWidth || 240;
-        const ww = window.innerWidth;
-
-        if (settings.panelPosition.left != null) {
-            // clamp left
-            const left = Math.max(8, Math.min(settings.panelPosition.left, ww - pw - 8));
-            panel.style.left = `${left}px`;
-        } else {
-            // compute left from right value
-            const right = settings.panelPosition.right || 12;
-            const left = Math.max(8, Math.min(ww - pw - right, ww - pw - 8));
-            panel.style.left = `${left}px`;
-        }
-        // ensure top visible
-        const ph = panel.offsetHeight || 200;
-        const top = Math.max(8, Math.min(settings.panelPosition.top || 120, window.innerHeight - ph - 8));
-        panel.style.top = `${top}px`;
-    };
-
-    // initial place and also on resize
-    placePanel();
-    window.addEventListener("resize", placePanel);
 
     const listeners = [];
 
@@ -333,66 +324,6 @@ export default function createSettingsPanel(doc) {
             applyPreset(input.value);
             updateSettings();
         });
-    });
-
-    collapse.addEventListener("click", () => {
-        const collapsed = panel.classList.toggle("collapsed");
-        collapse.textContent = collapsed ? "+" : "–";
-    });
-
-    const startDrag = function (event) {
-        if (event.target !== header) return;
-        event.preventDefault();
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const rect = panel.getBoundingClientRect();
-        const startLeft = rect.left;
-        const startTop = rect.top;
-
-        const move = function (moveEvent) {
-            const dx = moveEvent.clientX - startX;
-            const dy = moveEvent.clientY - startY;
-            const pw = panel.offsetWidth;
-            const ph = panel.offsetHeight;
-            const ww = window.innerWidth;
-            const wh = window.innerHeight;
-
-            let newLeft = Math.round(startLeft + dx);
-            let newTop = Math.round(startTop + dy);
-
-            // clamp so the panel remains visible inside the window
-            newLeft = Math.max(8, Math.min(newLeft, ww - pw - 8));
-            newTop = Math.max(8, Math.min(newTop, wh - ph - 8));
-
-            panel.style.left = `${newLeft}px`;
-            panel.style.top = `${newTop}px`;
-        };
-
-        const end = function () {
-            settings.panelPosition = {
-                left: parseInt(panel.style.left, 10) || 12,
-                top: parseInt(panel.style.top, 10) || 120
-            };
-            saveSettings(settings);
-            doc.removeEventListener("mousemove", move);
-            doc.removeEventListener("mouseup", end);
-        };
-
-        doc.addEventListener("mousemove", move);
-        doc.addEventListener("mouseup", end);
-    };
-
-    header.addEventListener("mousedown", startDrag);
-
-    // Double click header to reset position to default (visible)
-    header.addEventListener("dblclick", () => {
-        const pw = panel.offsetWidth || 240;
-        const left = Math.max(8, window.innerWidth - pw - 12);
-        const top = 120;
-        panel.style.left = `${left}px`;
-        panel.style.top = `${top}px`;
-        settings.panelPosition = { left, top };
-        saveSettings(settings);
     });
 
     applyPreset(settings.preset);

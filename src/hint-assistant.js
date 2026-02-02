@@ -1,3 +1,5 @@
+import createFloatingPanel from "./floating-panel";
+
 const WORDLIST_URLS = [
     "https://api.npoint.io/91ac00bc3d335f00e13f",
     "https://skribbliohints.github.io/words.json"
@@ -11,6 +13,26 @@ const POS_KEY = "skribbl-hints-pos";
 const WORD_CHECK_INTERVAL_MS = 500;
 const MAX_RENDERED_RESULTS = 200;
 const TOP_INLINE_RESULTS = 3;
+
+const loadPanelPosition = function () {
+    try {
+        const saved = JSON.parse(localStorage.getItem(POS_KEY) || "{}");
+        if (typeof saved.left === "number" && typeof saved.top === "number") {
+            return { left: saved.left, top: saved.top };
+        }
+    } catch (error) {
+        /* ignore */
+    }
+    return null;
+};
+
+const savePanelPosition = function (pos) {
+    try {
+        localStorage.setItem(POS_KEY, JSON.stringify({ left: pos.left, top: pos.top }));
+    } catch (error) {
+        /* ignore */
+    }
+};
 
 const safeJsonParse = function (text) {
     try {
@@ -95,39 +117,19 @@ const filterBySearch = function (words, searchTerm) {
 };
 
 const createPanel = function (doc) {
-    const panel = doc.createElement("div");
-    panel.id = "hintAssistantPanel";
-    const savedPos = (() => {
-        try {
-            return JSON.parse(localStorage.getItem(POS_KEY) || "{}");
-        } catch (e) {
-            return {};
-        }
-    })();
-    panel.style.left = `${savedPos.left ?? 12}px`;
-    panel.style.top = `${savedPos.top ?? 120}px`;
+    const floatingPanel = createFloatingPanel(doc, {
+        id: "hintAssistantPanel",
+        title: "Skribbl Hints",
+        bodyClass: "hintAssistantBody",
+        collapseClass: "autoDrawCollapse",
+        subtitle: "Loading word list...",
+        initialPosition: loadPanelPosition(),
+        getDefaultPosition: () => ({ left: 12, top: 120 }),
+        onPositionChange: savePanelPosition,
+        zIndex: 9998
+    });
 
-    const header = doc.createElement("div");
-    header.id = "hintAssistantHeader";
-    header.textContent = "Skribbl Hints";
-
-    const actions = doc.createElement("div");
-    actions.className = "hintAssistantActions";
-
-    const status = doc.createElement("span");
-    status.id = "hintAssistantStatus";
-    status.textContent = "Loading word list...";
-
-    const toggle = doc.createElement("button");
-    toggle.id = "hintAssistantToggle";
-    toggle.textContent = "–";
-
-    actions.appendChild(status);
-    actions.appendChild(toggle);
-    header.appendChild(actions);
-
-    const body = doc.createElement("div");
-    body.id = "hintAssistantBody";
+    const { panel, body, setSubtitle } = floatingPanel;
 
     const enableRow = doc.createElement("label");
     enableRow.className = "hintAssistantRow hintAssistantRow--split";
@@ -181,10 +183,7 @@ const createPanel = function (doc) {
     body.appendChild(enableRow);
     body.appendChild(inner);
 
-    panel.appendChild(header);
-    panel.appendChild(body);
-
-    return { panel, header, body, status, toggle, hintList, enableInput, search, langSelect, inner, savedPos };
+    return { panel, body, hintList, enableInput, search, langSelect, inner, setSubtitle };
 };
 
 const renderHints = function (doc, { hintList, inputChat, formChat }, words, pattern) {
@@ -225,12 +224,9 @@ export default function createHintAssistant(doc) {
 
     const inputChat = doc.querySelector("#game-chat form.chat-form input[type=text]");
     const formChat = doc.querySelector("#game-chat form.chat-form");
-    const containerSidebar = doc.body;
-
     if (!inputChat || !formChat) return null;
 
-    const { panel, header, body, status, toggle, hintList, enableInput, search, langSelect, inner, savedPos } = createPanel(doc);
-    containerSidebar.appendChild(panel);
+    const { hintList, enableInput, search, langSelect, inner, setSubtitle } = createPanel(doc);
 
     let enabled = localStorage.getItem(ENABLE_KEY) !== "0";
     let wordList = [];
@@ -273,67 +269,22 @@ export default function createHintAssistant(doc) {
         localStorage.setItem(ENABLE_KEY, enabled ? "1" : "0");
     };
 
+    const updateStatus = function (text) {
+        setSubtitle(text);
+    };
+
     const updateEnabledUi = function () {
-        toggle.textContent = panel.classList.contains("collapsed") ? "+" : "–";
         enableInput.checked = enabled;
         inner.style.display = enabled ? "" : "none";
         const langLabel = getLanguageLabel();
         if (!enabled) {
-            status.textContent = `Hints disabled (Alt to enable) | Lang: ${langLabel}`;
+            updateStatus(`Hints disabled (Alt to enable) | Lang: ${langLabel}`);
             return;
         }
         if (ready) {
-            status.textContent = `Loaded ${wordList.length} words | Lang: ${langLabel}`;
+            updateStatus(`Loaded ${wordList.length} words | Lang: ${langLabel}`);
         }
     };
-
-    toggle.addEventListener("click", () => {
-        const isCollapsed = panel.classList.toggle("collapsed");
-        toggle.textContent = isCollapsed ? "+" : "–";
-    });
-
-    const startDrag = function (event) {
-        if (event.target !== header) return;
-        event.preventDefault();
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const rect = panel.getBoundingClientRect();
-        const startLeft = rect.left;
-        const startTop = rect.top;
-
-        const move = function (moveEvent) {
-            const dx = moveEvent.clientX - startX;
-            const dy = moveEvent.clientY - startY;
-            const pw = panel.offsetWidth || 240;
-            const ph = panel.offsetHeight || 200;
-            const ww = window.innerWidth;
-            const wh = window.innerHeight;
-            let newLeft = Math.round(startLeft + dx);
-            let newTop = Math.round(startTop + dy);
-            newLeft = Math.max(8, Math.min(newLeft, ww - pw - 8));
-            newTop = Math.max(8, Math.min(newTop, wh - ph - 8));
-            panel.style.left = `${newLeft}px`;
-            panel.style.top = `${newTop}px`;
-        };
-
-        const end = function () {
-            doc.removeEventListener("mousemove", move);
-            doc.removeEventListener("mouseup", end);
-            try {
-                localStorage.setItem(POS_KEY, JSON.stringify({
-                    left: parseInt(panel.style.left, 10) || 12,
-                    top: parseInt(panel.style.top, 10) || 120
-                }));
-            } catch (e) {
-                /* ignore */
-            }
-        };
-
-        doc.addEventListener("mousemove", move);
-        doc.addEventListener("mouseup", end);
-    };
-
-    header.addEventListener("mousedown", startDrag);
 
     const getPattern = function () {
         const container = doc.querySelector("#game-word .hints .container");
@@ -360,36 +311,41 @@ export default function createHintAssistant(doc) {
     const inlineContainer = doc.createElement("div");
     inlineContainer.id = "hintAssistantInline";
     const attachInline = function () {
-        const gameWord = doc.getElementById("game-word");
-        const desc = gameWord ? gameWord.querySelector(".description") : null;
-        if (gameWord && desc) {
-            if (inlineContainer.parentElement !== gameWord) {
-                gameWord.insertBefore(inlineContainer, desc);
+        const chat = doc.getElementById("game-chat");
+        const chatForm = chat ? chat.querySelector(".chat-form") : null;
+        if (chat && chatForm) {
+            // Insert inline hints above the chat input
+            if (inlineContainer.parentElement !== chat || inlineContainer.nextSibling !== chatForm) {
+                chat.insertBefore(inlineContainer, chatForm);
             }
         }
     };
     attachInline();
 
     const renderInlineTop = function (matches) {
+        if (!enabled) {
+            if (inlineContainer.parentElement) {
+                inlineContainer.parentElement.removeChild(inlineContainer);
+            }
+            return;
+        }
         inlineContainer.innerHTML = "";
-        if (!enabled) return;
         if (!matches.length) return;
         matches.slice(0, TOP_INLINE_RESULTS).forEach(word => {
             const chip = doc.createElement("button");
             chip.type = "button";
             chip.className = "hintAssistantInlineChip";
             chip.textContent = word;
-            chip.title = "Click to fill. Ctrl/Cmd click submits.";
-            chip.addEventListener("click", event => {
-                if (!inputChat) return;
+            chip.title = "Click to send guess.";
+            chip.addEventListener("click", () => {
+                if (!inputChat || !formChat) return;
                 inputChat.value = word;
                 inputChat.focus();
-                if (formChat) {
-                    formChat.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-                }
+                formChat.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
             });
             inlineContainer.appendChild(chip);
         });
+        attachInline();
     };
 
     const sync = function () {
@@ -412,12 +368,12 @@ export default function createHintAssistant(doc) {
         .then(words => {
             wordList = words;
             ready = true;
-            status.textContent = `Loaded ${words.length} words | Lang: ${getLanguageLabel()}`;
+            updateStatus(`Loaded ${words.length} words | Lang: ${getLanguageLabel()}`);
             sync();
             updateEnabledUi();
         })
         .catch(() => {
-            status.textContent = "Failed to load word list";
+            updateStatus("Failed to load word list");
         });
 
     setInterval(sync, WORD_CHECK_INTERVAL_MS);
@@ -429,6 +385,9 @@ export default function createHintAssistant(doc) {
         lastPattern = ""; // force rerender inline/top3 on re-enable
         updateEnabledUi();
         sync();
+        if (!enabled && inlineContainer.parentElement) {
+            inlineContainer.parentElement.removeChild(inlineContainer);
+        }
     });
 
     enableInput.addEventListener("change", () => {
@@ -437,6 +396,9 @@ export default function createHintAssistant(doc) {
         lastPattern = ""; // force rerender inline/top3 on re-enable
         updateEnabledUi();
         sync();
+        if (!enabled && inlineContainer.parentElement) {
+            inlineContainer.parentElement.removeChild(inlineContainer);
+        }
     });
 
     search.addEventListener("input", () => {

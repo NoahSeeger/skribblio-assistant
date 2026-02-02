@@ -14,13 +14,12 @@
     display: grid;
 }
 
-#autoDrawPanel {
+.floatingPanel {
     position: fixed;
-    right: 12px;
     top: 120px;
     width: 280px;
     max-width: calc(100% - 24px);
-    z-index: 9999;
+    z-index: 9998;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     color: #1d2540;
     background: rgba(255, 255, 255, 0.95);
@@ -30,7 +29,15 @@
     overflow: visible;
 }
 
-#autoDrawPanel.collapsed .autoDrawBody {
+#autoDrawPanel {
+    z-index: 9999;
+}
+
+#hintAssistantPanel {
+    z-index: 9998;
+}
+
+.floatingPanel.collapsed .floatingPanelBody {
     display: none;
 }
 
@@ -48,6 +55,30 @@
     user-select: none;
 }
 
+.floatingPanelHeaderTitle {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.2;
+}
+
+.floatingPanelTitle {
+    font-size: 14px;
+}
+
+.floatingPanelSubtitle {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 0.85;
+}
+
+.floatingPanelHeaderActions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .autoDrawCollapse {
     background: transparent;
     color: #ffffff;
@@ -57,7 +88,7 @@
     padding: 0 6px;
 }
 
-.autoDrawBody {
+.floatingPanelBody {
     padding: 10px 12px 12px;
     display: grid;
     gap: 8px;
@@ -293,65 +324,6 @@
     opacity: 0.85;
 }
 
-#hintAssistantPanel {
-    position: fixed;
-    left: 12px;
-    top: 120px;
-    width: 260px;
-    max-width: calc(100% - 24px);
-    z-index: 9998;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    color: #1d2540;
-    background: rgba(255, 255, 255, 0.96);
-    border: 2px solid rgba(77, 115, 189, 0.35);
-    border-radius: 10px;
-    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
-    overflow: hidden;
-}
-
-#hintAssistantPanel.collapsed #hintAssistantBody {
-    display: none;
-}
-
-#hintAssistantHeader {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 12px;
-    font-weight: 600;
-    background: linear-gradient(90deg, #00c6ff, #0066ff);
-    color: #ffffff;
-    border-bottom: 2px solid rgba(0, 49, 133, 0.24);
-    border-radius: 10px 10px 0 0;
-    user-select: none;
-}
-
-.hintAssistantActions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-#hintAssistantStatus {
-    font-size: 12px;
-    opacity: 0.92;
-}
-
-#hintAssistantToggle {
-    background: transparent;
-    color: #ffffff;
-    border: none;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 0 6px;
-}
-
-#hintAssistantBody {
-    padding: 10px 12px 12px;
-    display: grid;
-    gap: 8px;
-}
-
 .hintAssistantInner {
     display: grid;
     gap: 8px;
@@ -429,10 +401,27 @@
 }
 
 #hintAssistantInline {
-    display: inline-flex;
-    gap: 6px;
+    display: flex;
     flex-wrap: wrap;
-    padding: 4px 0 6px 0;
+    gap: 6px;
+    margin: 0 auto 6px auto;
+    padding: 0 0 2px 0;
+    justify-content: center;
+    align-items: center;
+    max-width: 95%;
+    width: 100%;
+    box-sizing: border-box;
+    z-index: 2;
+}
+
+#hintAssistantInline:empty {
+    display: none;
+    margin: 0;
+}
+
+#game-word .description {
+    display: inline-flex;
+    align-items: center;
 }
 
 .hintAssistantInlineChip {
