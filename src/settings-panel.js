@@ -170,12 +170,17 @@ export default function createSettingsPanel(doc) {
         return null;
     };
 
+    const COLLAPSED_KEY = "skribbl-autodraw-panel-collapsed";
+    const loadCollapsed = () => localStorage.getItem(COLLAPSED_KEY) === "1";
+    const saveCollapsed = val => localStorage.setItem(COLLAPSED_KEY, val ? "1" : "0");
+
     const floatingPanel = createFloatingPanel(doc, {
         id: "autoDrawPanel",
         title: "AutoDraw",
         bodyClass: "autoDrawBody",
         collapseClass: "autoDrawCollapse",
         initialPosition: getStoredPanelPosition(),
+        initiallyCollapsed: loadCollapsed(),
         getDefaultPosition: panelEl => {
             const width = panelEl?.offsetWidth || PANEL_WIDTH_PX;
             const left = Math.max(8, window.innerWidth - width - 12);
@@ -184,6 +189,9 @@ export default function createSettingsPanel(doc) {
         onPositionChange: position => {
             settings.panelPosition = { left: position.left, top: position.top };
             saveSettings(settings);
+        },
+        onCollapsedChange: collapsed => {
+            saveCollapsed(collapsed);
         },
         zIndex: 9999
     });

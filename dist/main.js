@@ -1159,12 +1159,16 @@
       }
       return null;
     };
+    const COLLAPSED_KEY = "skribbl-autodraw-panel-collapsed";
+    const loadCollapsed = () => localStorage.getItem(COLLAPSED_KEY) === "1";
+    const saveCollapsed = (val) => localStorage.setItem(COLLAPSED_KEY, val ? "1" : "0");
     const floatingPanel = createFloatingPanel(doc, {
       id: "autoDrawPanel",
       title: "AutoDraw",
       bodyClass: "autoDrawBody",
       collapseClass: "autoDrawCollapse",
       initialPosition: getStoredPanelPosition(),
+      initiallyCollapsed: loadCollapsed(),
       getDefaultPosition: (panelEl) => {
         const width = panelEl?.offsetWidth || PANEL_WIDTH_PX;
         const left = Math.max(8, window.innerWidth - width - 12);
@@ -1173,6 +1177,9 @@
       onPositionChange: (position) => {
         settings2.panelPosition = { left: position.left, top: position.top };
         saveSettings(settings2);
+      },
+      onCollapsedChange: (collapsed) => {
+        saveCollapsed(collapsed);
       },
       zIndex: 9999
     });
@@ -1306,10 +1313,23 @@
   }
 
   // src/hint-assistant.js
-  var WORDLIST_URLS = [
-    "https://api.npoint.io/91ac00bc3d335f00e13f",
-    "https://skribbliohints.github.io/words.json"
-  ];
+  var LANGUAGE_SOURCES = {
+    en: { label: "English", url: "https://skribbliohints.github.io/English.json" },
+    fr: { label: "French", url: "https://skribbliohints.github.io/French.json" },
+    de: { label: "German", url: "https://skribbliohints.github.io/German.json" },
+    ko: { label: "Korean", url: "https://skribbliohints.github.io/Korean.json" },
+    es: { label: "Spanish", url: "https://skribbliohints.github.io/Spanish.json" }
+  };
+  var LANGUAGE_ALIASES = {
+    en: ["en", "english", "englisch"],
+    fr: ["fr", "french", "fran\xE7ais", "francais"],
+    de: ["de", "german", "deutsch"],
+    ko: ["ko", "korean", "\uD55C\uAD6D\uC5B4", "hangul"],
+    es: ["es", "spanish", "espa\xF1ol", "espanol"]
+  };
+  var DEFAULT_LANGUAGE = "en";
+  var AUTO_LANG_OPTION = "auto";
+  var HINT_COLLAPSE_KEY = "skribbl-hints-panel-collapsed";
   var CACHE_KEY = "skribbl-hints-cache-v1";
   var ENABLE_KEY = "skribbl-hints-enabled";
   var LANG_KEY = "skribbl-hints-lang";
@@ -1334,6 +1354,12 @@
     } catch (error) {
     }
   };
+  var loadPanelCollapsed = function() {
+    return localStorage.getItem(HINT_COLLAPSE_KEY) === "1";
+  };
+  var savePanelCollapsed = function(collapsed) {
+    localStorage.setItem(HINT_COLLAPSE_KEY, collapsed ? "1" : "0");
+  };
   var safeJsonParse = function(text) {
     try {
       return JSON.parse(text);
@@ -1341,16 +1367,55 @@
       return null;
     }
   };
-  var loadCachedWordList = function() {
-    const cached = safeJsonParse(localStorage.getItem(CACHE_KEY));
+  var buildCacheKey = (language) => `${CACHE_KEY}-${language}`;
+  var loadCachedWordList = function(language) {
+    const cached = safeJsonParse(localStorage.getItem(buildCacheKey(language)));
     if (!cached) return null;
     if (!Array.isArray(cached.words) || typeof cached.timestamp !== "number") return null;
     const isFresh = Date.now() - cached.timestamp < CACHE_TTL_MS;
     return isFresh ? cached.words : null;
   };
-  var saveCachedWordList = function(words) {
+  var saveCachedWordList = function(language, words) {
     const payload = { timestamp: Date.now(), words };
-    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    localStorage.setItem(buildCacheKey(language), JSON.stringify(payload));
+  };
+  var normalizeWordPayload = function(payload) {
+    if (!payload) return [];
+    const seen = /* @__PURE__ */ new Set();
+    const collected = [];
+    const pushWord = (word) => {
+      if (typeof word !== "string") return;
+      const normalized = word.trim();
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      collected.push(normalized);
+    };
+    const consume = (value) => {
+      if (!value) return;
+      if (typeof value === "string") {
+        pushWord(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(consume);
+        return;
+      }
+      if (typeof value === "object") {
+        if (Array.isArray(value.words)) {
+          value.words.forEach(consume);
+          return;
+        }
+        if (typeof value.word === "string") {
+          pushWord(value.word);
+          return;
+        }
+        Object.values(value).forEach(consume);
+      }
+    };
+    consume(payload);
+    return collected;
   };
   var fetchWithTimeout = function(url, timeoutMs = 8e3) {
     return new Promise((resolve, reject) => {
@@ -1362,24 +1427,14 @@
       }).then(resolve).catch(reject);
     });
   };
-  var fetchWordList = async function() {
-    const cached = loadCachedWordList();
-    if (cached) return cached;
-    for (const url of WORDLIST_URLS) {
-      try {
-        const data = await fetchWithTimeout(url);
-        if (Array.isArray(data)) {
-          saveCachedWordList(data);
-          return data;
-        }
-        if (data && Array.isArray(data.words)) {
-          saveCachedWordList(data.words);
-          return data.words;
-        }
-      } catch (error) {
-      }
+  var fetchWordList = async function(language) {
+    const source = LANGUAGE_SOURCES[language] || LANGUAGE_SOURCES[DEFAULT_LANGUAGE];
+    const data = await fetchWithTimeout(source.url);
+    const words = normalizeWordPayload(data);
+    if (!words.length) {
+      throw new Error(`Empty word list for ${language}`);
     }
-    throw new Error("Unable to load word list");
+    return words;
   };
   var buildRegex = function(pattern) {
     const sanitized = pattern.trim();
@@ -1408,6 +1463,8 @@
       initialPosition: loadPanelPosition(),
       getDefaultPosition: () => ({ left: 12, top: 120 }),
       onPositionChange: savePanelPosition,
+      initiallyCollapsed: loadPanelCollapsed(),
+      onCollapsedChange: savePanelCollapsed,
       zIndex: 9998
     });
     const { panel, body, setSubtitle } = floatingPanel;
@@ -1498,32 +1555,66 @@
     let lastPattern = "";
     let ready = false;
     const languageSelect = doc.querySelector("#item-settings-language");
-    const storedLang = localStorage.getItem(LANG_KEY);
-    const populateLangSelect = function() {
-      const seen = /* @__PURE__ */ new Set();
-      const addOption = (value, label) => {
-        if (seen.has(value)) return;
-        const opt = doc.createElement("option");
-        opt.value = value;
-        opt.textContent = label;
-        langSelect.appendChild(opt);
-        seen.add(value);
-      };
-      if (languageSelect) {
-        Array.from(languageSelect.options).forEach((opt) => {
-          const val = opt.value || opt.textContent || "unknown";
-          addOption(val, opt.textContent || val);
-        });
+    const wordListCache = {};
+    let detectedLanguage = DEFAULT_LANGUAGE;
+    let manualLanguage = AUTO_LANG_OPTION;
+    let currentLanguage = null;
+    let loadingLanguage = null;
+    const matchLanguageId = function(value) {
+      if (!value) return null;
+      const normalized = value.trim().toLowerCase();
+      if (!normalized) return null;
+      if (LANGUAGE_SOURCES[normalized]) return normalized;
+      for (const [lang, aliases] of Object.entries(LANGUAGE_ALIASES)) {
+        if (aliases.some((alias) => alias.toLowerCase() === normalized)) {
+          return lang;
+        }
       }
-      if (!seen.size) {
-        addOption("0", "English");
-        addOption("1", "German");
-      }
+      return null;
     };
-    const getLanguageLabel = function() {
-      const manualOpt = langSelect.options[langSelect.selectedIndex];
-      if (manualOpt) return (manualOpt.textContent || "Unknown").trim();
-      return "Unknown";
+    const normalizeStoredLanguage = function(value) {
+      if (!value || value === AUTO_LANG_OPTION) return AUTO_LANG_OPTION;
+      return matchLanguageId(value) || AUTO_LANG_OPTION;
+    };
+    manualLanguage = normalizeStoredLanguage(localStorage.getItem(LANG_KEY));
+    localStorage.setItem(LANG_KEY, manualLanguage);
+    const detectLanguageFromGame = function() {
+      if (!languageSelect) return DEFAULT_LANGUAGE;
+      const selected = languageSelect.options[languageSelect.selectedIndex];
+      if (!selected) return DEFAULT_LANGUAGE;
+      return matchLanguageId(selected.value) || matchLanguageId(selected.textContent) || DEFAULT_LANGUAGE;
+    };
+    detectedLanguage = detectLanguageFromGame();
+    const getLanguageMeta = function(languageId) {
+      return LANGUAGE_SOURCES[languageId] || LANGUAGE_SOURCES[DEFAULT_LANGUAGE];
+    };
+    const getActiveLanguageId = function() {
+      if (manualLanguage !== AUTO_LANG_OPTION && LANGUAGE_SOURCES[manualLanguage]) {
+        return manualLanguage;
+      }
+      return LANGUAGE_SOURCES[detectedLanguage] ? detectedLanguage : DEFAULT_LANGUAGE;
+    };
+    const getLanguageDisplayLabel = function() {
+      const meta = getLanguageMeta(getActiveLanguageId());
+      return manualLanguage === AUTO_LANG_OPTION ? `${meta.label} (auto)` : meta.label;
+    };
+    const populateLangSelect = function() {
+      langSelect.innerHTML = "";
+      const autoOption = doc.createElement("option");
+      autoOption.value = AUTO_LANG_OPTION;
+      autoOption.textContent = "Auto (match game)";
+      langSelect.appendChild(autoOption);
+      Object.entries(LANGUAGE_SOURCES).forEach(([id, meta]) => {
+        const opt = doc.createElement("option");
+        opt.value = id;
+        opt.textContent = meta.label;
+        langSelect.appendChild(opt);
+      });
+      if (!langSelect.querySelector(`option[value="${manualLanguage}"]`)) {
+        manualLanguage = AUTO_LANG_OPTION;
+        localStorage.setItem(LANG_KEY, manualLanguage);
+      }
+      langSelect.value = manualLanguage;
     };
     const persistEnabled = function() {
       localStorage.setItem(ENABLE_KEY, enabled ? "1" : "0");
@@ -1534,14 +1625,56 @@
     const updateEnabledUi = function() {
       enableInput.checked = enabled;
       inner.style.display = enabled ? "" : "none";
-      const langLabel = getLanguageLabel();
+      const langLabel = getLanguageDisplayLabel();
       if (!enabled) {
         updateStatus(`Hints disabled (Alt to enable) | Lang: ${langLabel}`);
         return;
       }
       if (ready) {
         updateStatus(`Loaded ${wordList.length} words | Lang: ${langLabel}`);
+      } else {
+        updateStatus(`Loading word list | Lang: ${langLabel}`);
       }
+    };
+    const getWordListForLanguage = async function(languageId) {
+      if (wordListCache[languageId]) return wordListCache[languageId];
+      const cached = loadCachedWordList(languageId);
+      if (cached) {
+        wordListCache[languageId] = cached;
+        return cached;
+      }
+      const fetched = await fetchWordList(languageId);
+      wordListCache[languageId] = fetched;
+      saveCachedWordList(languageId, fetched);
+      return fetched;
+    };
+    const loadLanguage = async function(languageId) {
+      const targetLanguage = LANGUAGE_SOURCES[languageId] ? languageId : DEFAULT_LANGUAGE;
+      loadingLanguage = targetLanguage;
+      ready = false;
+      updateEnabledUi();
+      try {
+        const words = await getWordListForLanguage(targetLanguage);
+        if (loadingLanguage !== targetLanguage) return;
+        wordList = words;
+        currentLanguage = targetLanguage;
+        ready = true;
+        updateEnabledUi();
+        lastPattern = "";
+        sync();
+      } catch (error) {
+        if (loadingLanguage !== targetLanguage) return;
+        ready = false;
+        updateStatus(`Failed to load ${getLanguageMeta(targetLanguage).label} word list`);
+      }
+    };
+    const refreshActiveLanguage = function(force = false) {
+      const nextLanguage = getActiveLanguageId();
+      if (!force && ready && currentLanguage === nextLanguage) {
+        updateEnabledUi();
+        return;
+      }
+      loadLanguage(nextLanguage);
     };
     const getPattern = function() {
       const container = doc.querySelector("#game-word .hints .container");
@@ -1615,15 +1748,6 @@
       renderHints(doc, { hintList, inputChat, formChat }, filtered, pattern);
       renderInlineTop(filtered);
     };
-    fetchWordList().then((words) => {
-      wordList = words;
-      ready = true;
-      updateStatus(`Loaded ${words.length} words | Lang: ${getLanguageLabel()}`);
-      sync();
-      updateEnabledUi();
-    }).catch(() => {
-      updateStatus("Failed to load word list");
-    });
     setInterval(sync, WORD_CHECK_INTERVAL_MS);
     doc.addEventListener("keyup", (event) => {
       if (event.key !== "Alt") return;
@@ -1651,30 +1775,26 @@
       sync();
     });
     langSelect.addEventListener("change", () => {
-      localStorage.setItem(LANG_KEY, langSelect.value || "");
+      manualLanguage = langSelect.value || AUTO_LANG_OPTION;
+      localStorage.setItem(LANG_KEY, manualLanguage);
       lastPattern = "";
-      updateEnabledUi();
-      sync();
+      refreshActiveLanguage(true);
     });
-    populateLangSelect();
-    if (storedLang) {
-      const opt = Array.from(langSelect.options).find((o) => o.value === storedLang);
-      if (opt) opt.selected = true;
-    } else if (languageSelect) {
-      langSelect.value = languageSelect.value;
-    }
-    updateEnabledUi();
     const observeLanguage = function() {
       if (!languageSelect) return;
       languageSelect.addEventListener("change", () => {
-        if (!localStorage.getItem(LANG_KEY)) {
-          langSelect.value = languageSelect.value;
+        detectedLanguage = detectLanguageFromGame();
+        if (manualLanguage === AUTO_LANG_OPTION) {
+          refreshActiveLanguage();
+        } else {
+          updateEnabledUi();
         }
-        updateEnabledUi();
-        sync();
       });
     };
+    populateLangSelect();
+    updateEnabledUi();
     observeLanguage();
+    refreshActiveLanguage(true);
     return {
       enable() {
         enabled = true;
